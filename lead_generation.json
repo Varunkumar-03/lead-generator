@@ -1,0 +1,468 @@
+{
+  "name": "Pegorion Daily B2B Lead Generation Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Schedule Trigger (09:00 AM IST)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "Industries",
+              "value": "[\"Medical Billing\", \"E-Publishing\", \"Customer Experience Services\", \"Healthcare BPO\", \"Digital Publishing\", \"Call Centers\"]"
+            },
+            {
+              "name": "Countries",
+              "value": "[\"United States\", \"United Kingdom\", \"Canada\", \"Australia\", \"Germany\"]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2",
+      "name": "Define Target Audiences",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const industries = JSON.parse($input.first().json.Industries);\nconst countries = JSON.parse($input.first().json.Countries);\n\nconst randomIndustry = industries[Math.floor(Math.random() * industries.length)];\nconst randomCountry = countries[Math.floor(Math.random() * countries.length)];\n\nreturn {\n  query: `\"${randomIndustry}\" companies in ${randomCountry} -jobs -directory`,\n  industry: randomIndustry,\n  country: randomCountry\n};"
+      },
+      "id": "3",
+      "name": "Generate Search Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"api_key\": \"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\", \"query\": $json.query, \"max_results\": 20 } }}",
+        "options": {}
+      },
+      "id": "4",
+      "name": "Search Tavily",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        700,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "results",
+        "options": {}
+      },
+      "id": "6",
+      "name": "Split Tavily Results",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        300
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": {
+          "__rl": true,
+          "value": "158RqzkyGQu1NQvckq8pSdYZDVCeKep3fPEcTU6mvr4E",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "7",
+      "name": "Fetch Existing Leads from Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        100
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const newLeads = $input.all(0);\nconst existingLeads = $input.all(1);\n\nconst existingUrls = new Set(existingLeads.map(item => item.json['Company Website']));\nconst blocklist = ['blog', 'top-', 'list', 'directory', 'clutch.co', 'zoominfo.com', 'goodfirms.co', 'matchboard.com.au', 'worldwidecallcenters.com', 'statista.com', 'recruit.net', 'yellowpages', 'yelp.'];\n\nreturn newLeads.filter(item => {\n  const url = item.json.url ? item.json.url.toLowerCase() : '';\n  const title = item.json.title ? item.json.title.toLowerCase() : '';\n  if (existingUrls.has(item.json.url)) return false;\n  for (const block of blocklist) {\n    if (url.includes(block)) return false;\n  }\n  if (title.includes('top ') || title.includes('list of')) return false;\n  return true;\n});"
+      },
+      "id": "8",
+      "name": "Deduplicate Against Existing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.url}}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 10000
+        }
+      },
+      "id": "9",
+      "name": "Visit Company Website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1500,
+        300
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $json.data || '';\n// Remove script and style tags and their contents\nlet clean = html.replace(/<script\\b[^<]*(?:(?!<\\/script>)<[^<]*)*<\\/script>/gi, ' ');\nclean = clean.replace(/<style\\b[^<]*(?:(?!<\\/style>)<[^<]*)*<\\/style>/gi, ' ');\n// Strip remaining HTML tags\nconst text = clean.replace(/<[^>]*>?/gm, ' ').replace(/\\s+/g, ' ').trim().substring(0, 15000);\nreturn { text };"
+      },
+      "id": "10",
+      "name": "Clean Website Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=YOUR_FREE_GEMINI_API_KEY",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"system_instruction\": { \"parts\": { \"text\": \"You are a strict data extractor evaluating a B2B company website. If the provided text appears to be a directory, a job board, a news article, or a list (e.g. 'Top 10 companies'), you MUST return 'Unknown' for company_name to reject it. Otherwise, extract the exact Company Name, LinkedIn URL, Headquarters Location (City/State), and Contact Email. Return ONLY valid JSON: {\\\"company_name\\\": \\\"...\\\", \\\"linkedin\\\": \\\"...\\\", \\\"location\\\": \\\"...\\\", \\\"contact_email\\\": \\\"...\\\"}. If a field is not found, return 'Not Found'.\" } }, \"contents\": [{ \"parts\":[{\"text\": $json.text}] }], \"generationConfig\": { \"response_mime_type\": \"application/json\" } } }}",
+        "options": {}
+      },
+      "id": "14",
+      "name": "Analyze with AI (Gemini)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1900,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  const content = $json.candidates[0].content.parts[0].text;\n  return JSON.parse(content);\n} catch (e) {\n  return { company_name: 'Unknown', linkedin: 'Not Found', location: 'Not Found', contact_email: 'Not Found' };\n}"
+      },
+      "id": "15",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "Company Name",
+              "value": "={{$json.company_name}}"
+            },
+            {
+              "name": "Company Website",
+              "value": "={{$('Deduplicate Against Existing').item.json.url}}"
+            },
+            {
+              "name": "Company Linkedin",
+              "value": "={{$json.linkedin}}"
+            },
+            {
+              "name": "Contact Emails",
+              "value": "={{$json.contact_email}}"
+            },
+            {
+              "name": "Company Sector",
+              "value": "={{$('Generate Search Query').item.json.industry}}"
+            },
+            {
+              "name": "Company Location",
+              "value": "={{$json.location}}"
+            },
+            {
+              "name": "Responsible Person (LinkedIn Profile URL or Business Email)",
+              "value": "Not Found"
+            },
+            {
+              "name": "Date Added",
+              "value": "={{$now}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "11",
+      "name": "Format Lead Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        2300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json['Company Name']}}",
+              "operation": "notEqual",
+              "value2": "Unknown"
+            },
+            {
+              "value1": "={{$json['Company Website']}}",
+              "operation": "notEmpty"
+            }
+          ]
+        }
+      },
+      "id": "12",
+      "name": "Filter Valid Leads",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "158RqzkyGQu1NQvckq8pSdYZDVCeKep3fPEcTU6mvr4E",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "13",
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2700,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (09:00 AM IST)": {
+      "main": [
+        [
+          {
+            "node": "Define Target Audiences",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Existing Leads from Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define Target Audiences": {
+      "main": [
+        [
+          {
+            "node": "Generate Search Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Search Query": {
+      "main": [
+        [
+          {
+            "node": "Search Tavily",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Tavily": {
+      "main": [
+        [
+          {
+            "node": "Split Tavily Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Tavily Results": {
+      "main": [
+        [
+          {
+            "node": "Deduplicate Against Existing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Existing Leads from Sheets": {
+      "main": [
+        [
+          {
+            "node": "Deduplicate Against Existing",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Deduplicate Against Existing": {
+      "main": [
+        [
+          {
+            "node": "Visit Company Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Visit Company Website": {
+      "main": [
+        [
+          {
+            "node": "Clean Website Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Website Text": {
+      "main": [
+        [
+          {
+            "node": "Analyze with AI (Gemini)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze with AI (Gemini)": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Format Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Lead Data": {
+      "main": [
+        [
+          {
+            "node": "Filter Valid Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Valid Leads": {
+      "main": [
+        [
+          {
+            "node": "Save to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "Asia/Kolkata",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}
